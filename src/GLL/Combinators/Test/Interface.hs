@@ -26,7 +26,7 @@
   * Left recursion
   * Hidden left-recursion
 -}
-module GLL.Combinators.Test.Interface where
+-- module GLL.Combinators.Test.Interface where
 
 import Control.Monad
 import Data.Char (ord)
@@ -39,6 +39,7 @@ import GLL.Parseable.Char ()
 -- | Defines and executes multiple1 unit-tests 
 main = do
     count <- newIORef 1
+    fails <- newIORef 0
     let test mref name p arg_pairs = do
             i <- readIORef count
             modifyIORef count succ
@@ -56,6 +57,7 @@ main = do
                     b           = norm_p_res == norm res
                 putStrLn ("  >> " ++ [j,')',' '] ++ show b)
                 unless b (putStrLn ("    >> " ++ show norm_p_res))
+                modifyIORef fails $ if b then id else succ
 
     --  Elementary parsers
     test Nothing "eps1" (satisfy 0) [("", [0])]
@@ -320,6 +322,8 @@ main = do
       (pX ("hash" <:=> 1 <$$ char '1'))
       [("1", [1]),("1(1)",[2]),("1(1)((1))", [3]),("1(1)((1))(((1)))",[4])
       ,("", []), ("11",[]), ("1(1)1", []), ("1(1)(1)", [])]-}
+    fails' <- readIORef fails
+    when (fails' > 0) $ error (show fails' ++ " failed test(s)")
  where
     aho_S_5 = ["10101010100","10101011000","10101100100","10101101000","10101110000","10110010100","10110011000","10110100100","10110101000","10110110000","10111000100","10111001000","10111010000","10111100000","11001010100","11001011000","11001100100","11001101000","11001110000","11010010100","11010011000","11010100100","11010101000","11010110000","11011000100","11011001000","11011010000","11011100000","11100010100","11100011000","11100100100","11100101000","11100110000","11101000100","11101001000","11101010000","11101100000","11110000100","11110001000","11110010000","11110100000","11111000000"]
 
