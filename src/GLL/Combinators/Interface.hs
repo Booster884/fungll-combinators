@@ -68,6 +68,7 @@ module GLL.Combinators.Interface (
 
 import GLL.Combinators.Options
 import GLL.Combinators.Visit.FUNGLL
+import GLL.Combinators.Visit.First
 import GLL.Combinators.Visit.Join
 import GLL.Combinators.Visit.Sem
 import GLL.Combinators.Memoisation
@@ -82,20 +83,23 @@ import Control.Monad (when)
 import Control.Arrow
 import qualified Data.Array as A
 import qualified Data.Map as M
-import Data.Text (pack)
+import Data.Text (pack, unpack)
 import Data.IORef 
 import Data.Time.Clock
 import System.IO.Unsafe
 
+import Debug.Trace (trace)
+
 parse' :: (Show t, Parseable t, IsSymbExpr s) => ParseOptions -> 
             PCOptions -> s t a -> [t] -> (ParseResult t, Either String [a])
 parse' popts opts p' input =  
-    let SymbExpr (Nt lower_start, vpa2, vpa3) = 
+    let SymbExpr (Nt lower_start, vpa2, vpa3, vpa4) =
           mkRule ("__Augment" <:=> OO [id <$$> p'])
         start       = pack "__Start"
         arr         = mkInput input 
         m           = length input 
-        parse_res   = parser_for start vpa2 arr
+        fsts        = firsts (constraints vpa4) "__Augment"
+        parse_res   = trace (show fsts) parser_for start vpa2 arr
         as          = evaluator_for lower_start vpa3 opts (bsrs_result parse_res) arr
         res_list    = unsafePerformIO as
     in (parse_res, if res_success parse_res && not (null res_list)
@@ -109,8 +113,9 @@ printParseData = printParseDataWithOptions [] []
 -- | Variant of 'printParseData' which can be controlled by 'ParseOption's
 printParseDataWithOptions :: (Parseable t, IsSymbExpr s, Show a) => ParseOptions -> CombinatorOptions -> s t a -> [t] -> IO ()
 printParseDataWithOptions popts opts p' input = 
-    let SymbExpr (Nt lower_start,vpa2,vpa3) = toSymb p'
+    let SymbExpr (Nt lower_start,vpa2,vpa3,vpa4) = toSymb p'
         start       = pack "__Start"
+        fsts        = firsts (constraints vpa4) (unpack start)
         parse_res   = parser_for start vpa2 arr
         arr         = mkInput input 
         m           = inputLength arr
@@ -132,8 +137,9 @@ evaluatorWithParseData = evaluatorWithParseDataAndOptions [] []
 
 evaluatorWithParseDataAndOptions :: (Parseable t, IsSymbExpr s, Show a) => ParseOptions -> CombinatorOptions -> s t a -> [t] -> [a]
 evaluatorWithParseDataAndOptions popts opts p' input = 
-    let SymbExpr (Nt lower_start,vpa2,vpa3) = toSymb p'
+    let SymbExpr (Nt lower_start,vpa2,vpa3,vpa4) = toSymb p'
         start       = pack "__Start"
+        fsts        = firsts (constraints vpa4) (unpack start)
         parse_res   = parser_for start vpa2 arr
         arr         = mkInput input 
         m           = inputLength arr
@@ -290,21 +296,21 @@ l' <||> r' = let l = toAlt l'
 -- Apply this combinator to an alternative to turn all underlying occurrences
 -- of '<**>' (or variants) apply 'longest match'.
 longest_match :: (Show t, Ord t, IsAltExpr alt) => alt t a -> AltExpr t a
-longest_match isalt = AltExpr (v1,v2,\opts -> v3 (maximumPivot opts))
-  where AltExpr (v1,v2,v3) = toAlt isalt 
+longest_match isalt = AltExpr (v1,v2,\opts -> v3 (maximumPivot opts),v4)
+  where AltExpr (v1,v2,v3,v4) = toAlt isalt
 
 -- Apply this combinator to an alternative to turn all underlying occurrences
 -- of '<**>' (or variants) apply 'shortest match'.
 shortest_match :: (Show t, Ord t, IsAltExpr alt) => alt t a -> AltExpr t a
-shortest_match isalt = AltExpr (v1,v2,\opts -> v3 (minimumPivot opts))
-  where AltExpr (v1,v2,v3) = toAlt isalt 
+shortest_match isalt = AltExpr (v1,v2,\opts -> v3 (minimumPivot opts),v4)
+  where AltExpr (v1,v2,v3,v4) = toAlt isalt
 
 -- | Create a symbol-parse for a terminal given:
 --
 --  * The 'Parseable' token represented by the terminal.
 --  * A function from that 'Parseable' to a semantic result.
 term_parser :: Parseable t => t -> (t -> a) -> SymbExpr t a 
-term_parser t f = SymbExpr (Term t, parse_term t,\_ _ _ inp l _ -> return [f (fst inp A.! l)])
+term_parser t f = SymbExpr (Term t, parse_term t,\_ _ _ inp l _ -> return [f (fst inp A.! l)],first_term $ token' t)
 
 -- | Create a symbol given a `RawParser` (see `GLL.Types.Input`)
 lexical :: String -> RawParser t -> SymbExpr t [t]
@@ -406,7 +412,8 @@ token name = term_parser (upcast (Token name Nothing)) (unwrap . downcast)
 
 epsilon :: (Show t, Ord t) => AltExpr t ()
 epsilon = AltExpr ([], seqStart ,\_ _ _ _ _ l r -> 
-                        if l == r then return [(l,())] else return [] )
+                        if l == r then return [(l,())] else return []
+                     , first_succeeds)
     where x = "__eps"
 
 -- | The empty right-hand side that yields its 
@@ -428,7 +435,7 @@ satisfy a = a <$$ epsilon
 -- The option 'useMemoisation' enables memoisation.
 -- It is off by default, even if 'memo' is used in a combinator expression.
 memo :: (Ord t, Show t, IsSymbExpr s) => MemoRef [a] -> s t a -> SymbExpr t a
-memo ref p' = let   SymbExpr (sym,rules,sem) = toSymb p'
+memo ref p' = let   SymbExpr (sym,rules,sem,first) = toSymb p'
                     lhs_sem opts ctx sppf arr l r 
                         | not (do_memo opts) = sem opts ctx sppf arr l r
                         | otherwise = do
@@ -438,7 +445,7 @@ memo ref p' = let   SymbExpr (sym,rules,sem) = toSymb p'
                                 Nothing -> do   as <- sem opts ctx sppf arr l r
                                                 modifyIORef ref (memInsert (l,r) as)
                                                 return as
-               in SymbExpr (sym, rules, lhs_sem)
+               in SymbExpr (sym, rules, lhs_sem, first)
 
 -- | 
 -- Helper function for defining new combinators.
@@ -446,15 +453,15 @@ memo ref p' = let   SymbExpr (sym,rules,sem) = toSymb p'
 -- the symbol of a given 'SymbExpr' and a 'String' that is unique to
 -- the newly defined combinator.
 mkNt :: (Show t, Ord t, IsSymbExpr s) => s t a -> String -> String 
-mkNt p str = let SymbExpr (myx,_,_) = mkRule p
+mkNt p str = let SymbExpr (myx,_,_,_) = mkRule p
                 in "_(" ++ show myx ++ ")" ++ str
 
 -- | Specialised fmap for altparsers
 (.$.) :: (Show t, Ord t, IsAltExpr i) => (a -> b) -> i t a -> AltExpr t b
-f .$. i = let AltExpr (s,r,sem) = toAlt i
+f .$. i = let AltExpr (s,r,sem,first) = toAlt i
             in AltExpr (s,r,\opts slot ctx sppf arr l r -> 
                                 do  as <- sem opts slot ctx sppf arr l r
-                                    return $ map (id *** f) as )
+                                    return $ map (id *** f) as , first)
 
 -- | 
 -- Variant of '<$$>' that ignores the semantic result of its second argument. 
