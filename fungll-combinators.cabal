@@ -44,6 +44,7 @@ library
 
     other-modules   :     GLL.Combinators.Visit.FUNGLL
                         , GLL.Combinators.Visit.Sem
+                        , GLL.Combinators.Visit.First
                         , GLL.Combinators.Visit.Join
                         , GLL.Combinators.Interface
                         , GLL.Types.TypeCompose
