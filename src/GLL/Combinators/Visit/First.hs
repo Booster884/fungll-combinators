@@ -3,7 +3,7 @@ module GLL.Combinators.Visit.First where
 
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Data.Maybe (fromMaybe)
+import Data.Maybe (mapMaybe)
 import Prelude hiding (seq)
 
 data VarTerm t = Concrete (Maybe t) | First NTLabel | Follow NTLabel
@@ -73,33 +73,34 @@ constraints c = (\(x, _, _) -> x) $ c M.empty ""
 
 -- Solve constraints to create a mapping from nonterminals to (concrete) first sets.
 firsts :: (Ord t) => Env t -> NTLabel -> M.Map NTLabel (S.Set (Maybe t))
-firsts env label = fromEnv $ solve env' (First label)
+firsts env label = fromEnv $ solve env'
     where env' = addToSet (Follow label) (S.singleton $ Concrete Nothing) env
 
-solve :: (Ord t) => Env t -> VarTerm t -> Env t
-solve env label = fst $ solve' env label
+solve :: (Ord t) => Env t -> Env t
+solve env = if env == env' then env' else solve env'
+    where env' = addTransitives env
 
-solve' :: (Ord t) => Env t -> VarTerm t -> (Env t, S.Set (VarTerm t))
-solve' env label | null vars = (M.adjust (S.delete label) label env, toks)
-                 | otherwise = let (env', symbs) = solve' env label'
-                               in solve' (M.adjust (S.delete label' . S.union symbs) label env') label
-                 where (vars, toks) = S.partition isVar $ S.delete label $ env M.! label
-                       label' = head $ S.toList vars -- Only evaluated if vars is not empty
+addTransitives :: (Ord t) => Env t -> Env t
+addTransitives env = foldl addTransitive env (M.keys env)
 
-isVar :: VarTerm t -> Bool
-isVar (First _)  = True
-isVar (Follow _) = True
-isVar _          = False
+addTransitive :: (Ord t) => Env t -> VarTerm t -> Env t
+addTransitive env label = M.insert label newSet env
+    where newSet = S.foldl' (\acc l -> acc `S.union` depsOf env l) oldSet oldSet
+          oldSet = env M.! label
+
+depsOf :: (Ord t) => Env t -> VarTerm t -> S.Set (VarTerm t)
+depsOf _   (Concrete _) = S.empty
+depsOf env label        = env M.! label
 
 fromEnv :: (Ord t) => Env t -> M.Map NTLabel (S.Set (Maybe t))
 -- HACK: Round trips through lists aren't great
 fromEnv env = M.fromList [(nt, keepTerms ts) | (First nt, ts) <- M.toList env]
-    where keepTerms ts = S.fromList $ fromMaybe [] $ mapM concretise (S.toList ts)
+    where keepTerms ts = S.fromList $ mapMaybe concretise (S.toList ts)
           concretise (Concrete x) = Just x
           concretise _            = Nothing
 
 -- tokenP :: t -> Comb t
--- tokenP = first_term . token
+-- tokenP = first_term . token'
 
 token' :: t -> VarTerm t
 token' = Concrete . Just
