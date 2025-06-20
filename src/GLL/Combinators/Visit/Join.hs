@@ -32,7 +32,7 @@ data AltExpr t a = AltExpr ([Symbol t], Parse_Alt t, Sem_Alt t a, First_Alt t)
 -- | A list of alternatives represents the right-hand side of a rule.
 type AltExprs = OO [] AltExpr
 
-mkNtRule :: (Show t, Ord t, HasAlts b) => Bool -> Bool -> String -> b t a -> SymbExpr t a
+mkNtRule :: (Show t, Ord t, Parseable t, HasAlts b) => Bool -> Bool -> String -> b t a -> SymbExpr t a
 mkNtRule use_ctx left_biased x' altPs' =
     let vas1 = map (\(AltExpr (f,_,_,_)) -> f) altPs 
         vas2 = map (\(AltExpr (_,s,_,_)) -> s) altPs
@@ -43,14 +43,14 @@ mkNtRule use_ctx left_biased x' altPs' =
         x     = pack x'
     in SymbExpr (Nt x, parse_nterm x vas2, sem_nterm use_ctx left_biased x alts vas3, first_nterm x' vas4)
 
-join_apply :: (Show t, Ord t, IsSymbExpr s, Foldable f) => 
+join_apply :: (Show t, Ord t, Parseable t, IsSymbExpr s, Foldable f) =>
                 (a -> f b) -> s t a -> AltExpr t b
 join_apply f p' = 
     let SymbExpr (vpa1,vpa2,vpa3,vpa4) = mkRule p' in AltExpr
           -- TODO: Maybe make `first_apply`? Don't know what `parse_apply` does.
           ([vpa1],parse_apply vpa2, sem_apply f vpa3, vpa4)
 
-join_seq :: (Show t, Ord t, IsAltExpr i, IsSymbExpr s) => 
+join_seq :: (Show t, Ord t, Parseable t, IsAltExpr i, IsSymbExpr s) =>
               CombinatorOptions -> i t (a -> b) -> s t a -> AltExpr t b
 join_seq local_opts pl' pr' = 
   let AltExpr (vimp1,vimp2,vimp3,vimp4) = toAlt pl'
@@ -69,9 +69,9 @@ join_andNot (SymbExpr (_,p_parser,p_sem,p_fst)) (SymbExpr (_, q_parser, q_sem,q_
 -- | 
 -- Class for lifting to 'SymbExpr'.
 class IsSymbExpr a where
-    toSymb :: (Show t, Ord t) => a t b -> SymbExpr t b
+    toSymb :: (Show t, Ord t, Parseable t) => a t b -> SymbExpr t b
     -- | Synonym of 'toSymb' for creating /derived combinators/. 
-    mkRule :: (Show t, Ord t) => a t b -> BNF t b
+    mkRule :: (Show t, Ord t, Parseable t) => a t b -> BNF t b
     mkRule = toSymb
 
 instance IsSymbExpr AltExpr where
@@ -89,7 +89,7 @@ instance IsSymbExpr AltExprs where
 -- | 
 -- Class for lifting to 'AltExprs'. 
 class HasAlts a where
-    altsOf :: (Show t, Ord t) => a t b -> [AltExpr t b]
+    altsOf :: (Show t, Ord t, Parseable t) => a t b -> [AltExpr t b]
 
 instance HasAlts AltExpr where
     altsOf = (:[])
@@ -103,7 +103,7 @@ instance HasAlts AltExprs where
 -- | 
 -- Class for lifting to 'AltExpr'. 
 class IsAltExpr a where
-    toAlt :: (Show t, Ord t) => a t b -> AltExpr t b
+    toAlt :: (Show t, Ord t, Parseable t) => a t b -> AltExpr t b
 
 instance IsAltExpr AltExpr where
     toAlt = id
