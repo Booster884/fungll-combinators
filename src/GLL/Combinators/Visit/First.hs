@@ -12,7 +12,7 @@ type NTLabel = String
 type First t = S.Set (VarTerm t)
 type Follow t = S.Set (VarTerm t)
 type Env t = M.Map (VarTerm t) (S.Set (VarTerm t))
-type Firsts t = M.Map NTLabel (First t)
+type Firsts t = M.Map NTLabel (S.Set (Maybe t))
 type Res t = (Env t, First t, Follow t)
 type Comb t = Env t -> NTLabel -> Res t
 
@@ -22,14 +22,15 @@ type First_Seq t = Comb t
 type First_Alt t = Comb t
 
 addToSet :: (Ord t) => VarTerm t -> First t -> Env t -> Env t
-addToSet t ts = M.adjust (`S.union` ts) t
+addToSet t ts env | t `M.member` env = M.adjust (`S.union` ts) t env
+                  | otherwise        = M.insert t ts env
 
 addDummy :: (Ord t) => NTLabel -> Env t -> Env t
 addDummy label = M.union (M.fromList [ (First label, S.empty)
                                      , (Follow label, S.empty)])
 
 first_nterm :: (Ord t) => NTLabel -> [First_Choice t] -> First_Symb t
-first_nterm  label = first_nterm' label . foldl first_alt first_fails
+first_nterm label = first_nterm' label . foldl first_alt first_fails
 
 first_nterm' :: (Ord t) => NTLabel -> First_Choice t -> First_Symb t
 first_nterm' label c env _ = case (M.lookup (First label) env, M.lookup (Follow label) env) of
@@ -51,9 +52,11 @@ first_seq l r env nt = (env', lfst, rflw)
           env' = foldr (`addToSet` rfst) le toModify
 
 first_alt :: (Ord t) => First_Choice t -> First_Seq t -> First_Choice t
-first_alt l r env nt = (re, lfst `S.union` rfst, lflw `S.union` rflw)
+first_alt l r env nt = (env', lfst `S.union` rfst, lflw `S.union` rflw)
     where (le, lfst, lflw) = l env nt
           (re, rfst, rflw) = r le nt
+          toModify = [Follow x | Follow x <- S.toList $ rflw `S.union` lflw]
+          env' = foldr (`addToSet` S.singleton (Follow nt)) re toModify
 
 -- Equivalent to epsilon
 first_succeeds :: First_Seq t
@@ -72,7 +75,7 @@ constraints c = (\(x, _, _) -> x) $ c M.empty ""
 --------------------------------------------------------------------------------
 
 -- Solve constraints to create a mapping from nonterminals to (concrete) first sets.
-firsts :: (Ord t) => Env t -> NTLabel -> M.Map NTLabel (S.Set (Maybe t))
+firsts :: (Ord t, Show t) => Env t -> NTLabel -> Firsts t
 firsts env label = fromEnv $ solve env'
     where env' = addToSet (Follow label) (S.singleton $ Concrete Nothing) env
 
@@ -92,7 +95,7 @@ depsOf :: (Ord t) => Env t -> VarTerm t -> S.Set (VarTerm t)
 depsOf _   (Concrete _) = S.empty
 depsOf env label        = env M.! label
 
-fromEnv :: (Ord t) => Env t -> M.Map NTLabel (S.Set (Maybe t))
+fromEnv :: (Ord t) => Env t -> Firsts t
 -- HACK: Round trips through lists aren't great
 fromEnv env = M.fromList [(nt, keepTerms ts) | (First nt, ts) <- M.toList env]
     where keepTerms ts = S.fromList $ mapMaybe concretise (S.toList ts)

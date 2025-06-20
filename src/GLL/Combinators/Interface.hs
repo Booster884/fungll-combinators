@@ -88,8 +88,6 @@ import Data.IORef
 import Data.Time.Clock
 import System.IO.Unsafe
 
-import Debug.Trace (trace)
-
 parse' :: (Show t, Parseable t, IsSymbExpr s) => ParseOptions -> 
             PCOptions -> s t a -> [t] -> (ParseResult t, Either String [a])
 parse' popts opts p' input =  
@@ -99,7 +97,7 @@ parse' popts opts p' input =
         arr         = mkInput input 
         m           = length input 
         fsts        = firsts (constraints vpa4) "__Augment"
-        parse_res   = trace (show fsts) parser_for start vpa2 arr
+        parse_res   = parser_for start vpa2 arr fsts
         as          = evaluator_for lower_start vpa3 opts (bsrs_result parse_res) arr
         res_list    = unsafePerformIO as
     in (parse_res, if res_success parse_res && not (null res_list)
@@ -116,7 +114,7 @@ printParseDataWithOptions popts opts p' input =
     let SymbExpr (Nt lower_start,vpa2,vpa3,vpa4) = toSymb p'
         start       = pack "__Start"
         fsts        = firsts (constraints vpa4) (unpack start)
-        parse_res   = parser_for start vpa2 arr
+        parse_res   = parser_for start vpa2 arr fsts
         arr         = mkInput input 
         m           = inputLength arr
     in do startTime <- getCurrentTime
@@ -140,7 +138,7 @@ evaluatorWithParseDataAndOptions popts opts p' input =
     let SymbExpr (Nt lower_start,vpa2,vpa3,vpa4) = toSymb p'
         start       = pack "__Start"
         fsts        = firsts (constraints vpa4) (unpack start)
-        parse_res   = parser_for start vpa2 arr
+        parse_res   = parser_for start vpa2 arr fsts
         arr         = mkInput input 
         m           = inputLength arr
     in unsafePerformIO $ do 
@@ -218,7 +216,7 @@ infixl 2 <:=>
 -- | 
 -- Form a rule by giving the name of the left-hand side of the new rule.
 -- Use this combinator on recursive non-terminals.
-(<:=>) :: (Show t, Ord t, HasAlts b) => String -> b t a -> SymbExpr t a 
+(<:=>) :: (Show t, Ord t, Parseable t, HasAlts b) => String -> b t a -> SymbExpr t a
 x <:=> altPs = mkNtRule False False x altPs
 infixl 2 <::=>
 
@@ -230,16 +228,16 @@ infixl 2 <::=>
 --  if and only if it is left-recursive and would be
 --  left-recursive if all the right-hand sides of the productions of the
 --  grammar are reversed.
-(<::=>) :: (Show t, Ord t, HasAlts b) => String -> b t a -> SymbExpr t a 
+(<::=>) :: (Show t, Ord t, Parseable t, HasAlts b) => String -> b t a -> SymbExpr t a
 x <::=> altPs = mkNtRule True False x altPs
 
 -- | Variant of '<::=>' that can be supplied with a list of alternates
-chooses :: (Show t, Ord t, IsAltExpr alt) => String -> [alt t a] -> SymbExpr t a
+chooses :: (Show t, Ord t, Parseable t, IsAltExpr alt) => String -> [alt t a] -> SymbExpr t a
 chooses p alts | null alts = error "chooses cannot be given an empty list of alternatives"
                | otherwise = (<::=>) p (OO (map toAlt alts))
 
 -- | Variant of '<::=' that can be supplied with a list of alternates
-chooses_prec :: (Show t, Ord t, IsAltExpr alt) => String -> [alt t a] -> SymbExpr t a
+chooses_prec :: (Show t, Ord t, Parseable t, IsAltExpr alt) => String -> [alt t a] -> SymbExpr t a
 chooses_prec p alts | null alts = error "chooses cannot be given an empty list of alternatives"
                     | otherwise = (<::=) p (OO (map toAlt alts))
 
@@ -247,14 +245,14 @@ infixl 4 <$$>
 -- |
 -- Form an 'AltExpr' by mapping some semantic action overy the result
 -- of the second argument.
-(<$$>) :: (Show t, Ord t, IsSymbExpr s) => (a -> b) -> s t a -> AltExpr t b
+(<$$>) :: (Show t, Ord t, Parseable t, IsSymbExpr s) => (a -> b) -> s t a -> AltExpr t b
 f <$$> p' = join_apply ((:[]) . f) p'
 
 infixl 4 <$$$>
 -- | 
 -- Variant of `<$$>` that gives access to the underlying ambiguity representation
 -- The semantic action can be used to disambiguate, for example using `guard`.
-(<$$$>) :: (Show t, Ord t, IsSymbExpr s, Foldable f) => (a -> f b) -> s t a -> AltExpr t b
+(<$$$>) :: (Show t, Ord t, Parseable t, IsSymbExpr s, Foldable f) => (a -> f b) -> s t a -> AltExpr t b
 f <$$$> p' = join_apply f p'
 
 
@@ -264,17 +262,17 @@ infixl 4 <**>,<<<**>,<**>>>
 -- creating a new 'AltExpr'. 
 -- The semantic result of the first argument is applied to the second 
 -- as a cross-product. 
-(<**>) :: (Show t, Ord t, IsAltExpr i, IsSymbExpr s) => 
+(<**>) :: (Show t, Ord t, Parseable t, IsAltExpr i, IsSymbExpr s) =>
             i t (a -> b) -> s t a -> AltExpr t b
 pl' <**> pr' = join_seq [] pl' pr'
 
 -- | Variant of '<**>' that applies longest match on the left operand.
-(<**>>>) :: (Show t, Ord t, IsAltExpr i, IsSymbExpr s) => 
+(<**>>>) :: (Show t, Ord t, Parseable t, IsAltExpr i, IsSymbExpr s) =>
             i t (a -> b) -> s t a -> AltExpr t b
 pl' <**>>> pr' = join_seq [maximumPivot] pl' pr'
 
 -- | Variant of '<**>' that applies shortest match on the left operand.
-(<<<**>) :: (Show t, Ord t, IsAltExpr i, IsSymbExpr s) => 
+(<<<**>) :: (Show t, Ord t, Parseable t, IsAltExpr i, IsSymbExpr s) =>
             i t (a -> b) -> s t a -> AltExpr t b
 pl' <<<**> pr' = join_seq [minimumPivot] pl' pr'
 
@@ -287,7 +285,7 @@ infixr 3 <||>
 -- |
 -- Add an 'AltExpr' to a list of 'AltExpr'
 -- The resuling  '[] :. AltExpr' forms the right-hand side of a rule.
-(<||>) :: (Show t, Ord t, IsAltExpr i, HasAlts b) => i t a -> b t a -> AltExprs t a
+(<||>) :: (Show t, Ord t, Parseable t, IsAltExpr i, HasAlts b) => i t a -> b t a -> AltExprs t a
 l' <||> r' = let l = toAlt l'
                  r = altsOf r'
              in OO (l : r)
@@ -295,13 +293,13 @@ l' <||> r' = let l = toAlt l'
 -- |
 -- Apply this combinator to an alternative to turn all underlying occurrences
 -- of '<**>' (or variants) apply 'longest match'.
-longest_match :: (Show t, Ord t, IsAltExpr alt) => alt t a -> AltExpr t a
+longest_match :: (Show t, Ord t, Parseable t, IsAltExpr alt) => alt t a -> AltExpr t a
 longest_match isalt = AltExpr (v1,v2,\opts -> v3 (maximumPivot opts),v4)
   where AltExpr (v1,v2,v3,v4) = toAlt isalt
 
 -- Apply this combinator to an alternative to turn all underlying occurrences
 -- of '<**>' (or variants) apply 'shortest match'.
-shortest_match :: (Show t, Ord t, IsAltExpr alt) => alt t a -> AltExpr t a
+shortest_match :: (Show t, Ord t, Parseable t, IsAltExpr alt) => alt t a -> AltExpr t a
 shortest_match isalt = AltExpr (v1,v2,\opts -> v3 (minimumPivot opts),v4)
   where AltExpr (v1,v2,v3,v4) = toAlt isalt
 
@@ -418,7 +416,7 @@ epsilon = AltExpr ([], seqStart ,\_ _ _ _ _ l r ->
 
 -- | The empty right-hand side that yields its 
 --  first argument as a semantic result.
-satisfy :: (Show t, Ord t ) => a -> AltExpr t a
+satisfy :: (Show t, Ord t, Parseable t) => a -> AltExpr t a
 satisfy a = a <$$ epsilon
 
 -- | 
@@ -434,7 +432,7 @@ satisfy a = a <$$ epsilon
 -- 'memo' relies on 'unsafePerformIO' and is therefore potentially unsafe.
 -- The option 'useMemoisation' enables memoisation.
 -- It is off by default, even if 'memo' is used in a combinator expression.
-memo :: (Ord t, Show t, IsSymbExpr s) => MemoRef [a] -> s t a -> SymbExpr t a
+memo :: (Ord t, Show t, Parseable t, IsSymbExpr s) => MemoRef [a] -> s t a -> SymbExpr t a
 memo ref p' = let   SymbExpr (sym,rules,sem,first) = toSymb p'
                     lhs_sem opts ctx sppf arr l r 
                         | not (do_memo opts) = sem opts ctx sppf arr l r
@@ -452,12 +450,12 @@ memo ref p' = let   SymbExpr (sym,rules,sem,first) = toSymb p'
 -- Use 'mkNt' to form a new unique non-terminal name based on
 -- the symbol of a given 'SymbExpr' and a 'String' that is unique to
 -- the newly defined combinator.
-mkNt :: (Show t, Ord t, IsSymbExpr s) => s t a -> String -> String 
+mkNt :: (Show t, Ord t, Parseable t, IsSymbExpr s) => s t a -> String -> String
 mkNt p str = let SymbExpr (myx,_,_,_) = mkRule p
-                in "_(" ++ show myx ++ ")" ++ str
+                in "_(" ++ show  myx ++ ")" ++ str
 
 -- | Specialised fmap for altparsers
-(.$.) :: (Show t, Ord t, IsAltExpr i) => (a -> b) -> i t a -> AltExpr t b
+(.$.) :: (Show t, Ord t, Parseable t, IsAltExpr i) => (a -> b) -> i t a -> AltExpr t b
 f .$. i = let AltExpr (s,r,sem,first) = toAlt i
             in AltExpr (s,r,\opts slot ctx sppf arr l r -> 
                                 do  as <- sem opts slot ctx sppf arr l r
@@ -465,7 +463,7 @@ f .$. i = let AltExpr (s,r,sem,first) = toAlt i
 
 -- | 
 -- Variant of '<$$>' that ignores the semantic result of its second argument. 
-(<$$) :: (Show t, Ord t, IsSymbExpr s) => b -> s t a -> AltExpr t b
+(<$$) :: (Show t, Ord t, Parseable t, IsSymbExpr s) => b -> s t a -> AltExpr t b
 f <$$ p = const f <$$> p
 infixl 4 <$$
 
@@ -474,30 +472,30 @@ infixl 4 **>, <<**>, **>>>
 
 -- | 
 -- Variant of '<**>' that ignores the semantic result of the first argument.
-(**>) :: (Show t, Ord t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t b
+(**>) :: (Show t, Ord t, Parseable t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t b
 l **> r = flip const .$. l <**> r
 
 -- Variant of '<**>' that applies longest match on its left operand. 
-(**>>>) :: (Show t, Ord t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t b
+(**>>>) :: (Show t, Ord t, Parseable t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t b
 l **>>> r = flip const .$. l <**>>> r
 
 -- Variant of '<**>' that ignores shortest match on its left operand.
-(<<**>) :: (Show t, Ord t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t b
+(<<**>) :: (Show t, Ord t, Parseable t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t b
 l <<**>r = flip const .$. l <<<**> r
 
 
 infixl 4 <**, <<<**, <**>>
 -- | 
 -- Variant of '<**>' that ignores the semantic result of the second argument.
-(<**) :: (Show t, Ord t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t a
+(<**) :: (Show t, Ord t, Parseable t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t a
 l <** r = const .$. l <**> r 
 
 -- | Variant of '<**' that applies longest match on its left operand.
-(<**>>) :: (Show t, Ord t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t a
+(<**>>) :: (Show t, Ord t, Parseable t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t a
 l <**>> r = const .$. l <**>>> r 
 
 -- | Variant '<**' that applies shortest match on its left operand
-(<<<**) :: (Show t, Ord t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t a
+(<<<**) :: (Show t, Ord t, Parseable t, IsAltExpr i, IsSymbExpr s) => i t a -> s t b -> AltExpr t a
 l <<<** r = const .$. l <<<**> r 
 
 -- | 
@@ -512,32 +510,32 @@ infixl 2 <:=
 
 -- | Try to apply a parser multiple times (0 or more) with shortest match
 -- applied to each occurrence of the parser.
-many :: (Show t, Ord t, IsSymbExpr s) => s t a -> SymbExpr t [a]
+many :: (Show t, Ord t, Parseable t, IsSymbExpr s) => s t a -> SymbExpr t [a]
 many = multiple_ (<<<**>)
 
 -- | Try to apply a parser multiple times (1 or more) with shortest match
 -- applied to each occurrence of the parser.
-many1 :: (Show t, Ord t, IsSymbExpr s) => s t a -> SymbExpr t [a]
+many1 :: (Show t, Ord t, Parseable t, IsSymbExpr s) => s t a -> SymbExpr t [a]
 many1 = multiple1_ (<<<**>) 
 
 -- | Try to apply a parser multiple times (0 or more) with longest match
 -- applied to each occurrence of the parser.
-some :: (Show t, Ord t, IsSymbExpr s) => s t a -> SymbExpr t [a]
+some :: (Show t, Ord t, Parseable t, IsSymbExpr s) => s t a -> SymbExpr t [a]
 some = multiple_ (<**>>>)
 
 -- | Try to apply a parser multiple times (1 or more) with longest match
 -- applied to each occurrence of the parser.
-some1 :: (Show t, Ord t, IsSymbExpr s) => s t a -> SymbExpr t [a]
+some1 :: (Show t, Ord t, Parseable t, IsSymbExpr s) => s t a -> SymbExpr t [a]
 some1 = multiple1_ (<**>>>) 
 
 -- | Try to apply a parser multiple times (0 or more). The results are returned in a list.
 -- In the case of ambiguity the largest list is returned.
-multiple :: (Show t, Ord t, IsSymbExpr s) => s t a -> SymbExpr t [a]
+multiple :: (Show t, Ord t, Parseable t, IsSymbExpr s) => s t a -> SymbExpr t [a]
 multiple = multiple_ (<**>)
 
 -- | Try to apply a parser multiple times (1 or more). The results are returned in a list.
 -- In the case of ambiguity the largest list is returned.
-multiple1 :: (Show t, Ord t, IsSymbExpr s) => s t a -> SymbExpr t [a]
+multiple1 :: (Show t, Ord t, Parseable t, IsSymbExpr s) => s t a -> SymbExpr t [a]
 multiple1 = multiple1_ (<**>)
 
 -- | Internal
@@ -549,35 +547,35 @@ multiple1_ disa p = let fresh = mkNt p "+"
                      in fresh <::=> ((:) <$$> p) `disa` (multiple_ disa p)
 
 -- | Same as 'many' but with an additional separator.
-manySepBy :: (Show t, Ord t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) => 
+manySepBy :: (Show t, Ord t, Parseable t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) =>
                 s t a -> s2 t b -> SymbExpr t [a]
 manySepBy = sepBy many
 -- | Same as 'many1' but with an additional separator.
-manySepBy1 :: (Show t, Ord t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) => 
+manySepBy1 :: (Show t, Ord t, Parseable t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) =>
                 s t a -> s2 t b -> SymbExpr t [a]
 manySepBy1 = sepBy1 many
 -- | Same as 'some1' but with an additional separator.
-someSepBy :: (Show t, Ord t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) => 
+someSepBy :: (Show t, Ord t, Parseable t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) =>
                 s t a -> s2 t b -> SymbExpr t [a]
 someSepBy = sepBy some
 -- | Same as 'some1' but with an additional separator.
-someSepBy1 :: (Show t, Ord t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) => 
+someSepBy1 :: (Show t, Ord t, Parseable t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) =>
                 s t a -> s2 t b -> SymbExpr t [a]
 someSepBy1 = sepBy1 some
 -- | Same as 'multiple' but with an additional separator.
-multipleSepBy :: (Show t, Ord t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) => 
+multipleSepBy :: (Show t, Ord t, Parseable t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) =>
                     s t a -> s2 t b -> SymbExpr t [a]
 multipleSepBy = sepBy multiple 
 -- | Same as 'multiple1' but with an additional separator.
-multipleSepBy1 :: (Show t, Ord t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) => 
+multipleSepBy1 :: (Show t, Ord t, Parseable t, IsSymbExpr s, IsSymbExpr s2, IsAltExpr s2) =>
                     s t a -> s2 t b -> SymbExpr t [a]
 multipleSepBy1 = sepBy1 multiple 
 
-sepBy :: (Show t, Ord t, IsSymbExpr s1, IsSymbExpr s2, IsAltExpr s2) => 
+sepBy :: (Show t, Ord t, Parseable t, IsSymbExpr s1, IsSymbExpr s2, IsAltExpr s2) =>
            (AltExpr t a -> SymbExpr t [a]) -> s1 t a -> s2 t b -> SymbExpr t [a]
 sepBy mult p c = mkRule $ satisfy [] <||> (:) <$$> p <**> mult (c **> p)
 
-sepBy1 :: (Show t, Ord t, IsSymbExpr s1, IsSymbExpr s2, IsAltExpr s2) => 
+sepBy1 :: (Show t, Ord t, Parseable t, IsSymbExpr s1, IsSymbExpr s2, IsAltExpr s2) =>
            (AltExpr t a -> SymbExpr t [a]) -> s1 t a -> s2 t b -> SymbExpr t [a]
 sepBy1 mult p c = mkRule $ (:) <$$> p <**> mult (c **> p)
 
@@ -598,7 +596,7 @@ manySepBy2 p s = mkRule $
   (:) <$$> p <** s <**> manySepBy1 p s
 
 -- | Derive either from the given symbol or the empty string.
-optional :: (Show t, Ord t, IsSymbExpr s) => s t a -> SymbExpr t (Maybe a)
+optional :: (Show t, Ord t, Parseable t, IsSymbExpr s) => s t a -> SymbExpr t (Maybe a)
 optional p = fresh 
   <:=>  Just <$$> p 
   <||>  satisfy Nothing 
@@ -606,7 +604,7 @@ optional p = fresh
 
 -- | Version of 'optional' that prefers to derive from the given symbol,
 -- affects only nullable nonterminal symbols
-preferably :: (Show t, Ord t, IsSymbExpr s) => s t a -> SymbExpr t (Maybe a)
+preferably :: (Show t, Ord t, Parseable t, IsSymbExpr s) => s t a -> SymbExpr t (Maybe a)
 preferably p = fresh 
   <:=   Just <$$> p 
   <||>  satisfy Nothing 
@@ -614,17 +612,17 @@ preferably p = fresh
 
 -- | Version of 'optional' that prefers to derive the empty string from 
 -- the given symbol, affects only nullable nonterminal symbols
-reluctantly :: (Show t, Ord t, IsSymbExpr s) => s t a -> SymbExpr t (Maybe a)
+reluctantly :: (Show t, Ord t, Parseable t, IsSymbExpr s) => s t a -> SymbExpr t (Maybe a)
 reluctantly p = fresh 
   <:=   satisfy Nothing  
   <||>  Just <$$> p
   where fresh = mkNt p "?"
 
-optionalWithDef :: (Show t, Ord t, IsSymbExpr s) => s t a -> a -> SymbExpr t a 
+optionalWithDef :: (Show t, Ord t, Parseable t, IsSymbExpr s) => s t a -> a -> SymbExpr t a
 optionalWithDef p def = mkNt p "?" <:=> id <$$> p <||> satisfy def
 
 -- | Place a piece of BNF /within/ two other BNF fragments, ignoring their semantics.
-within :: (Show t, Ord t, IsSymbExpr s) => BNF t a -> s t b -> BNF t c -> BNF t b
+within :: (Show t, Ord t, Parseable t, IsSymbExpr s) => BNF t a -> s t b -> BNF t c -> BNF t b
 within l p r = mkRule $ l **> toSymb p <** r
 
 -- | Place a piece of BNF between the characters '(' and ')'.
@@ -640,12 +638,12 @@ quotes p = within (keychar '\'') p (keychar '\'')
 -- | Place a piece of BNF between two double quotes.
 dquotes p = within (keychar '"') p (keychar '"')
 
-foldr_multiple :: (IsSymbExpr s, Parseable t) => s t (a -> a) -> a -> BNF t a 
+foldr_multiple :: (IsSymbExpr s, Parseable t) => s t (a -> a) -> a -> BNF t a
 foldr_multiple comb def = mkNt comb "-foldr" 
   <::=> satisfy def 
   <||> ($)      <$$> comb <<<**> foldr_multiple comb def
 
-foldr_multipleSepBy :: (IsSymbExpr s, Parseable t) => s t (a -> a) -> s t b -> a -> BNF t a 
+foldr_multipleSepBy :: (IsSymbExpr s, Parseable t) => s t (a -> a) -> s t b -> a -> BNF t a
 foldr_multipleSepBy comb sep def = mkNt comb "-foldr" 
   <::=> satisfy def 
   <||>  ($ def) <$$> comb
