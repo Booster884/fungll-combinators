@@ -102,8 +102,8 @@ fromEnv env = M.fromList [(nt, keepTerms ts) | (First nt, ts) <- M.toList env]
           concretise (Concrete x) = Just x
           concretise _            = Nothing
 
--- tokenP :: t -> Comb t
--- tokenP = first_term . token'
+tokenP :: t -> Comb t
+tokenP = first_term . token'
 
 token' :: t -> VarTerm t
 token' = Concrete . Just

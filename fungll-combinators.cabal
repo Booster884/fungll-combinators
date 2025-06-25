@@ -41,10 +41,11 @@ library
                         , GLL.Types.BSR
                         , GLL.Types.DataSets
                         , GLL.Types.Input
+                        -- The only way to test a module is to expose it, but this is really an internal module.
+                        , GLL.Combinators.Visit.First
 
     other-modules   :     GLL.Combinators.Visit.FUNGLL
                         , GLL.Combinators.Visit.Sem
-                        , GLL.Combinators.Visit.First
                         , GLL.Combinators.Visit.Join
                         , GLL.Combinators.Interface
                         , GLL.Types.TypeCompose
@@ -56,3 +57,12 @@ test-suite interface
     type:       exitcode-stdio-1.0
     main-is:    src/GLL/Combinators/Test/Interface.hs
     build-depends: base, fungll-combinators, gll
+
+test-suite first
+    type:             exitcode-stdio-1.0
+    main-is:          src/GLL/Combinators/Test/First.hs
+    build-depends:    base >= 4.18
+                    , containers >= 0.4
+                    , hspec >= 2.11
+                    , fungll-combinators
+                    , gll
