@@ -47,7 +47,6 @@ join_apply :: (Show t, Ord t, Parseable t, IsSymbExpr s, Foldable f) =>
                 (a -> f b) -> s t a -> AltExpr t b
 join_apply f p' = 
     let SymbExpr (vpa1,vpa2,vpa3,vpa4) = mkRule p' in AltExpr
-          -- TODO: Maybe make `first_apply`? Don't know what `parse_apply` does.
           ([vpa1],parse_apply vpa2, sem_apply f vpa3, vpa4)
 
 join_seq :: (Show t, Ord t, Parseable t, IsAltExpr i, IsSymbExpr s) =>
@@ -58,7 +57,6 @@ join_seq local_opts pl' pr' =
   (vimp1++[vpa1], parse_seq vimp2 vpa2, sem_seq local_opts vimp3 vpa3, first_seq vimp4 vpa4)
 
 join_lexical :: Nt -> RawParser t -> SymbExpr t [t]
--- TODO: Calculating a first set from a predicate needs some amount of smarts to achieve
 join_lexical nt regex = SymbExpr (Nt nt, parse_lexical nt regex, sem_slice regex, undefined)
 
 join_andNot :: (Show t) => SymbExpr t a -> SymbExpr t b -> SymbExpr t a

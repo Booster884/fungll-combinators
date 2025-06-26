@@ -4,7 +4,6 @@ module GLL.Combinators.Visit.First where
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Maybe (mapMaybe)
-import Prelude hiding (seq)
 
 data VarTerm t = Concrete (Maybe t) | First NTLabel | Follow NTLabel
     deriving (Eq, Ord, Show)
@@ -33,9 +32,9 @@ first_nterm :: (Ord t) => NTLabel -> [First_Choice t] -> First_Symb t
 first_nterm label = first_nterm' label . foldl first_alt first_fails
 
 first_nterm' :: (Ord t) => NTLabel -> First_Choice t -> First_Symb t
-first_nterm' label c env _ = case (M.lookup (First label) env, M.lookup (Follow label) env) of
-    (Just _, Just _) -> (env, first', follow')
-    _ -> let (env', first, follow) = c (addDummy label env) label
+first_nterm' label c env _ = if (First label) `M.member` env && (Follow label) `M.member` env
+    then (env, first', follow')
+    else let (env', first, follow) = c (addDummy label env) label
              env'' = addToSet (First label) first (addToSet (Follow label) follow env')
          in (env'', first', follow')
     where first' = S.singleton $ First label
@@ -62,7 +61,6 @@ first_alt l r env nt = (env', lfst `S.union` rfst, lflw `S.union` rflw)
 first_succeeds :: First_Seq t
 first_succeeds env nt = (env, S.singleton $ Follow nt, S.empty)
 
--- TODO: Not quite sure what this represents, EOF?
 first_fails :: First_Choice t
 first_fails env _ = (env, S.empty, S.empty)
 
@@ -96,7 +94,6 @@ depsOf _   (Concrete _) = S.empty
 depsOf env label        = env M.! label
 
 fromEnv :: (Ord t) => Env t -> Firsts t
--- HACK: Round trips through lists aren't great
 fromEnv env = M.fromList [(nt, keepTerms ts) | (First nt, ts) <- M.toList env]
     where keepTerms ts = S.fromList $ mapMaybe concretise (S.toList ts)
           concretise (Concrete x) = Just x

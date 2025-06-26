@@ -110,9 +110,7 @@ nextChar :: Input t -> Int -> t
 nextChar (arr, _) l = arr A.! l
 
 nextInFirst :: (Ord t, Parseable t) => Input t -> Int -> Firsts t -> String -> Bool
-nextInFirst inp l env nt = "_" `L.isPrefixOf` nt
-                           || (n `matches` eos)
-                           || S.member True (S.map (matches n . conv) fsts)
+nextInFirst inp l env nt = S.member True (S.map (matches n . conv) fsts)
   where fsts = env M.! nt
         n = nextChar inp l
         conv (Just x) = x
